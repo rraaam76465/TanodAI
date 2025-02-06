@@ -7,6 +7,7 @@ import { useEffect } from 'react';
 import 'react-native-reanimated';
 
 import { useColorScheme } from '@/hooks/useColorScheme';
+import { useAuth } from '@/hooks/useAuth';
 
 // Prevent the splash screen from auto-hiding before asset loading is complete.
 SplashScreen.preventAutoHideAsync();
@@ -16,6 +17,8 @@ export default function RootLayout() {
   const [loaded] = useFonts({
     SpaceMono: require('../assets/fonts/SpaceMono-Regular.ttf'),
   });
+
+  const { user } = useAuth();
 
   useEffect(() => {
     if (loaded) {
@@ -30,8 +33,15 @@ export default function RootLayout() {
   return (
     <ThemeProvider value={colorScheme === 'dark' ? DarkTheme : DefaultTheme}>
       <Stack>
-        <Stack.Screen name="(tabs)" options={{ headerShown: false }} />
-        <Stack.Screen name="+not-found" />
+        {!user ? (
+          <>
+            <Stack.Screen name="(auth)" options={{ headerShown: false }} />
+          </>
+        ) : (
+          <>
+            <Stack.Screen name="(dashboard)" options={{ headerShown: false }} />
+          </>
+        )}
       </Stack>
       <StatusBar style="auto" />
     </ThemeProvider>
