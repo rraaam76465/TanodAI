@@ -1,49 +1,46 @@
-import { DarkTheme, DefaultTheme, ThemeProvider } from '@react-navigation/native';
-import { useFonts } from 'expo-font';
-import { Stack } from 'expo-router';
-import * as SplashScreen from 'expo-splash-screen';
-import { StatusBar } from 'expo-status-bar';
-import { useEffect } from 'react';
-import 'react-native-reanimated';
-
-import { useColorScheme } from '@/hooks/useColorScheme';
+import { useState, useEffect } from 'react';
+import { Stack, router } from 'expo-router';
+import { CustomSplashScreen } from '@/components/CustomSplashScreen';
 import { useAuth } from '@/hooks/useAuth';
 
-// Prevent the splash screen from auto-hiding before asset loading is complete.
-SplashScreen.preventAutoHideAsync();
-
 export default function RootLayout() {
-  const colorScheme = useColorScheme();
-  const [loaded] = useFonts({
-    SpaceMono: require('../assets/fonts/SpaceMono-Regular.ttf'),
-  });
-
-  const { user } = useAuth();
+  const { user, loading } = useAuth();
+  const [isSplashLoading, setIsSplashLoading] = useState(true);
 
   useEffect(() => {
-    if (loaded) {
-      SplashScreen.hideAsync();
-    }
-  }, [loaded]);
+    setTimeout(() => {
+      setIsSplashLoading(false);
+    }, 2000); // Adjust timing as needed
+  }, []);
 
-  if (!loaded) {
-    return null;
+  useEffect(() => {
+    if (!isSplashLoading && !loading) {
+      console.log('Navigating based on user state:', user);
+      if (!user) {
+        router.replace('/(auth)/login');
+      } else {
+        router.replace('/(dashboard)');
+      }
+    }
+  }, [isSplashLoading, loading, user]);
+
+  console.log('User:', user);
+  console.log('Loading:', loading);
+
+  if (isSplashLoading || loading) {
+    return <CustomSplashScreen />;
   }
 
   return (
-    <ThemeProvider value={colorScheme === 'dark' ? DarkTheme : DefaultTheme}>
-      <Stack>
-        {!user ? (
-          <>
-            <Stack.Screen name="(auth)" options={{ headerShown: false }} />
-          </>
-        ) : (
-          <>
-            <Stack.Screen name="(dashboard)" options={{ headerShown: false }} />
-          </>
-        )}
-      </Stack>
-      <StatusBar style="auto" />
-    </ThemeProvider>
+    <Stack>
+      <Stack.Screen
+        name="(auth)"
+        options={{ headerShown: false }}
+      />
+      <Stack.Screen
+        name="(dashboard)"
+        options={{ headerShown: false }}
+      />
+    </Stack>
   );
 }
