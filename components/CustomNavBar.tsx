@@ -9,6 +9,7 @@ const CustomNavBar = () => {
   const [notificationCount, setNotificationCount] = useState(2); // Initial count
 
   const handleTabPress = (tab: string) => {
+    if (activeTab === tab) return; // Do nothing if the tab is already active
     setActiveTab(tab);
     if (tab === 'index') {
       router.replace('/(dashboard)/');
@@ -26,6 +27,7 @@ const CustomNavBar = () => {
             activeTab === 'index' && styles.activeTab
           ]}
           onPress={() => handleTabPress('index')}
+          disabled={activeTab === 'index'}
         >
           <Ionicons 
             name="home"
@@ -40,6 +42,7 @@ const CustomNavBar = () => {
             activeTab === 'notifications' && styles.activeTab
           ]}
           onPress={() => handleTabPress('notifications')}
+          disabled={activeTab === 'notifications'}
         >
           <View>
             <Ionicons 
@@ -63,6 +66,7 @@ const CustomNavBar = () => {
             activeTab === 'profile' && styles.activeTab
           ]}
           onPress={() => handleTabPress('profile')}
+          disabled={activeTab === 'profile'}
         >
           <Ionicons 
             name="person"
@@ -78,14 +82,14 @@ const CustomNavBar = () => {
 const styles = StyleSheet.create({
   container: {
     position: 'absolute',
-    bottom: 20,
+    bottom: 40,
     left: 0,
     right: 0,
     alignItems: 'center',
   },
   navBar: {
     flexDirection: 'row',
-    backgroundColor: '#fff',
+    backgroundColor: 'rgba(255, 255, 255, 0.9)',
     borderRadius: 30,
     paddingHorizontal: 20,
     paddingVertical: 15,

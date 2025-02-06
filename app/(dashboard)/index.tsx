@@ -9,20 +9,65 @@ import { Colors } from '@/constants/Colors';
 import { useColorScheme } from '@/hooks/useColorScheme';
 import { router, useRouter } from 'expo-router';
 import { supabase } from '@/lib/supabase';
+import * as Location from 'expo-location';
 
 const { width } = Dimensions.get('window');
 
+interface User {
+  user_metadata?: {
+    firstName?: string;
+  };
+}
+
 export default function DashboardScreen() {
-  const { user } = useAuth();
+  const { user } = useAuth() as User;
+  console.log('User Object:', user);
   const { weather, loading, error } = useWeather();
   const colorScheme = useColorScheme();
   const router = useRouter();
   const [profileImage, setProfileImage] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(false);
+  const [name, setName] = useState('User');
+  const [region, setRegion] = useState({
+    latitude: 37.78825, // Default fallback
+    longitude: -122.4324, // Default fallback
+    latitudeDelta: 0.0922,
+    longitudeDelta: 0.0421,
+  });
 
   const getUserInitial = () => {
-    return user?.user_metadata?.firstName?.charAt(0) || 'U';
+    return user?.raw_user_meta_data?.name?.charAt(0) || 'U';
   };
+
+  useEffect(() => {
+    const fetchSession = async () => {
+      const { data: { session } } = await supabase.auth.getSession();
+      if (session?.user?.user_metadata?.name) {
+        setName(session.user.user_metadata.name);
+      }
+    };
+    fetchSession();
+  }, []);
+
+  useEffect(() => {
+    const fetchLocation = async () => {
+      const { status } = await Location.requestForegroundPermissionsAsync();
+      if (status !== 'granted') {
+        Alert.alert('Permission denied', 'Location permission is required to show the map.');
+        return;
+      }
+
+      const location = await Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.High });
+      setRegion({
+        latitude: location.coords.latitude,
+        longitude: location.coords.longitude,
+        latitudeDelta: 0.0922,
+        longitudeDelta: 0.0421,
+      });
+    };
+
+    fetchLocation();
+  }, []);
 
   return (
     <View style={styles.container}>
@@ -30,7 +75,7 @@ export default function DashboardScreen() {
       <View style={styles.header}>
         <View style={styles.greetingContainer}>
           <Text style={styles.greeting}>Hello,</Text>
-          <Text style={styles.username}>{user?.user_metadata?.firstName || 'User'}</Text>
+          <Text style={styles.username}>{name}</Text>
         </View>
         <View style={styles.profilePlaceholder}>
           <Text style={styles.profilePlaceholderText}>
@@ -73,14 +118,9 @@ export default function DashboardScreen() {
         <View style={styles.mapBentoBox}>
           <MapView
             style={styles.map}
-            initialRegion={{
-              latitude: 37.78825,
-              longitude: -122.4324,
-              latitudeDelta: 0.0922,
-              longitudeDelta: 0.0421,
-            }}
+            region={region}
           >
-            <Marker coordinate={{ latitude: 37.78825, longitude: -122.4324 }} title={"Your Location"} />
+            <Marker coordinate={{ latitude: region.latitude, longitude: region.longitude }} title={"Your Location"} />
           </MapView>
         </View>
 

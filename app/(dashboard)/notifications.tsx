@@ -8,6 +8,7 @@ import {
   StatusBar,
   FlatList,
   Alert,
+  ScrollView,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useNavigation } from '@react-navigation/native';
@@ -17,6 +18,12 @@ export default function NotificationsScreen() {
   const [notifications, setNotifications] = useState([
     { id: '1', message: 'New message' },
     { id: '2', message: 'System update' },
+    { id: '3', message: 'Reminder: Meeting at 3 PM' },
+    { id: '4', message: 'You have a new follower' },
+    { id: '5', message: 'Your order has been shipped' },
+    { id: '6', message: 'Weekly report is ready' },
+    { id: '7', message: 'New comment on your post' },
+    { id: '8', message: 'Your subscription is expiring soon' },
   ]);
 
   const handleClearNotifications = () => {
@@ -37,7 +44,7 @@ export default function NotificationsScreen() {
               headerRight: () => null,
             });
             // Update the badge in the navbar
-            navigation.setParams({ notificationCount: 0 });
+            navigation.setParams({ notificationCount: 0 } as any);
           },
         },
       ]
@@ -62,67 +69,57 @@ export default function NotificationsScreen() {
   return (
     <SafeAreaView style={styles.container}>
       <StatusBar barStyle="dark-content" />
-      
-      {/* Header */}
-      <View style={styles.header}>
-        <Text style={styles.headerText}>Notifications</Text>
-        <TouchableOpacity style={styles.profilePic}>
-          <View style={styles.avatar} />
-        </TouchableOpacity>
-      </View>
-
-      {/* Alert Card */}
-      <View style={styles.alertCard}>
-        <View style={styles.alertIconContainer}>
-          <Ionicons name="warning" size={24} color="black" />
-        </View>
-        <Text style={styles.alertTitle}>Smoke alarm triggered</Text>
-        <Text style={styles.alertTime}>Yesterday - 10:15 am</Text>
-        
-        {/* Circular Animation View */}
-        <View style={styles.circularAnimation}>
-          <View style={[styles.circle, styles.circle4]} />
-          <View style={[styles.circle, styles.circle3]} />
-          <View style={[styles.circle, styles.circle2]} />
-          <View style={[styles.circle, styles.circle1]} />
+      <ScrollView>
+        {/* Header */}
+        <View style={styles.header}>
+          <Text style={styles.headerText}>Notifications</Text>
+          <TouchableOpacity style={styles.profilePic}>
+            <View style={styles.avatar} />
+          </TouchableOpacity>
         </View>
 
-        {/* Buttons */}
-        <TouchableOpacity style={styles.detailsButton}>
-          <Text style={styles.detailsButtonText}>See Details</Text>
-        </TouchableOpacity>
-        
-        <TouchableOpacity style={styles.dismissButton}>
-          <Text style={styles.dismissButtonText}>Dismiss</Text>
-        </TouchableOpacity>
-      </View>
-
-      {/* Pagination Dots */}
-      <View style={styles.pagination}>
-        <View style={[styles.dot, styles.activeDot]} />
-        <View style={styles.dot} />
-      </View>
-
-      {/* Latest Events Section */}
-      <View style={styles.eventsSection}>
-        <Text style={styles.eventsTitle}>Latest events</Text>
-        {notifications.length > 0 ? (
-          <FlatList
-            data={notifications}
-            keyExtractor={(item) => item.id}
-            renderItem={({ item }) => (
-              <View style={styles.notificationItem}>
-                <Text style={styles.notificationText}>{item.message}</Text>
-              </View>
-            )}
-          />
-        ) : (
-          <View style={styles.emptyContainer}>
-            <Ionicons name="notifications-off" size={40} color="#666" />
-            <Text style={styles.emptyText}>No notifications</Text>
+        {/* Alert Card */}
+        <View style={styles.alertCard}>
+          <View style={styles.alertIconContainer}>
+            <Ionicons name="warning" size={24} color="black" />
           </View>
-        )}
-      </View>
+          <Text style={styles.alertTitle}>Smoke alarm triggered</Text>
+          <Text style={styles.alertTime}>Yesterday - 10:15 am</Text>
+          
+          {/* Circular Animation View */}
+          <View style={styles.circularAnimation}>
+            <View style={[styles.circle, styles.circle4]} />
+            <View style={[styles.circle, styles.circle3]} />
+            <View style={[styles.circle, styles.circle2]} />
+            <View style={[styles.circle, styles.circle1]} />
+          </View>
+
+          {/* Buttons */}
+          <TouchableOpacity style={styles.detailsButton}>
+            <Text style={styles.detailsButtonText}>See Details</Text>
+          </TouchableOpacity>
+          
+          <TouchableOpacity style={styles.dismissButton}>
+            <Text style={styles.dismissButtonText}>Dismiss</Text>
+          </TouchableOpacity>
+        </View>
+
+        {/* Pagination Dots */}
+        <View style={styles.pagination}>
+          <View style={[styles.dot, styles.activeDot]} />
+          <View style={styles.dot} />
+        </View>
+
+        {/* Latest Events Section */}
+        <View style={styles.eventsSection}>
+          <Text style={styles.eventsTitle}>Latest events</Text>
+          {notifications.map((notification) => (
+            <View key={notification.id} style={styles.notificationItem}>
+              <Text style={styles.notificationText}>{notification.message}</Text>
+            </View>
+          ))}
+        </View>
+      </ScrollView>
     </SafeAreaView>
   );
 }
@@ -260,7 +257,7 @@ const styles = StyleSheet.create({
     fontSize: 16,
   },
   notificationItem: {
-    padding: 15,
+    padding: 16,
     borderBottomWidth: 1,
     borderBottomColor: '#eee',
   },

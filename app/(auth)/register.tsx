@@ -3,6 +3,7 @@ import { View, Text, TextInput, Button, StyleSheet, Alert, Image, TouchableOpaci
 import { Link, router } from 'expo-router';
 import { useAuth } from '@/hooks/useAuth';
 import { IconSymbol } from '@/components/ui/IconSymbol';
+import { supabase } from '@/lib/supabase';
 
 export default function RegisterScreen() {
   const [name, setName] = useState('');
@@ -13,12 +14,21 @@ export default function RegisterScreen() {
   const [showPassword, setShowPassword] = useState(false);
 
   const handleRegister = async () => {
-    try {
-      await register(email, password, name, lastName);
+    const { data, error } = await supabase.auth.signUp({
+      email,
+      password,
+      options: {
+        data: {
+          name: `${name} ${lastName}`,
+        },
+      },
+    });
+
+    if (error) {
+      Alert.alert('Error', error.message);
+    } else {
       Alert.alert('Success', 'Registration successful!');
       router.replace('/(auth)/login'); // Navigate to login after successful registration
-    } catch (error) {
-      Alert.alert('Registration Error', error.message);
     }
   };
 

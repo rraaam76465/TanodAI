@@ -1,13 +1,25 @@
-import React, { useState } from 'react';
-import { View, Text, StyleSheet, TouchableOpacity, Image, Alert, ActivityIndicator } from 'react-native';
+import React, { useState, useEffect } from 'react';
+import { View, Text, StyleSheet, TouchableOpacity, Image, Alert, ActivityIndicator, TextInput } from 'react-native';
 import * as ImagePicker from 'expo-image-picker';
 import * as ImageManipulator from 'expo-image-manipulator';
 import { useAuth } from '@/hooks/useAuth';
 import { Ionicons } from '@expo/vector-icons';
+import { supabase } from '@/lib/supabase';
+import { Audio } from 'expo-av';
+import * as Notifications from 'expo-notifications';
 
 export default function ProfileScreen() {
   const { user, logout } = useAuth();
   const [isLoading, setIsLoading] = useState(false);
+  const [isEditing, setIsEditing] = useState(false);
+  const [name, setName] = useState(user?.raw_user_meta_data?.name || 'User');
+  const [isSoundDropdownOpen, setIsSoundDropdownOpen] = useState(false);
+
+  useEffect(() => {
+    if (user?.raw_user_meta_data?.name) {
+      setName(user.raw_user_meta_data.name);
+    }
+  }, [user]);
 
   const getUserInitial = () => {
     return user?.user_metadata?.firstName?.charAt(0) || 'U';
@@ -67,6 +79,42 @@ export default function ProfileScreen() {
     );
   };
 
+  const handleUpdateName = async () => {
+    if (!name.trim()) {
+      Alert.alert('Error', 'Name cannot be empty');
+      return;
+    }
+
+    setIsLoading(true);
+    try {
+      const { data: { user: updatedUser }, error } = await supabase.auth.updateUser({
+        data: { name },
+      });
+
+      if (error) throw error;
+
+      // Refresh the session to ensure the changes are reflected
+      const { data: { session }, error: sessionError } = await supabase.auth.getSession();
+      if (sessionError) throw sessionError;
+
+      // Update the local state with the new metadata
+      setName(updatedUser?.raw_user_meta_data?.name || name);
+      Alert.alert('Success', 'Name updated successfully');
+      setIsEditing(false);
+    } catch (error) {
+      Alert.alert('Error', error.message);
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  const handleTestSoundAlert = async () => {
+    const { sound } = await Audio.Sound.createAsync(
+      require('@/assets/sounds/alert.mp3') // Add a sound file in your assets
+    );
+    await sound.playAsync();
+  };
+
   return (
     <View style={styles.container}>
       <Text style={styles.title}>Profile</Text>
@@ -96,9 +144,37 @@ export default function ProfileScreen() {
       {/* Profile Information */}
       <View style={styles.profileInfo}>
         <Text style={styles.label}>Name:</Text>
-        <Text style={styles.value}>
-          {user?.user_metadata?.firstName} {user?.user_metadata?.lastName}
-        </Text>
+        {isEditing ? (
+          <View style={styles.editContainer}>
+            <TextInput
+              style={styles.input}
+              value={name}
+              onChangeText={setName}
+              autoFocus
+            />
+            <TouchableOpacity 
+              style={styles.saveButton}
+              onPress={handleUpdateName}
+              disabled={isLoading}
+            >
+              {isLoading ? (
+                <ActivityIndicator size="small" color="#fff" />
+              ) : (
+                <Text style={styles.saveButtonText}>Save</Text>
+              )}
+            </TouchableOpacity>
+          </View>
+        ) : (
+          <View style={styles.nameContainer}>
+            <Text style={styles.value}>{name}</Text>
+            <TouchableOpacity 
+              style={styles.editIcon}
+              onPress={() => setIsEditing(true)}
+            >
+              <Ionicons name="pencil" size={20} color="#E26964" />
+            </TouchableOpacity>
+          </View>
+        )}
 
         <Text style={styles.label}>Email:</Text>
         <Text style={styles.value}>{user?.email}</Text>
@@ -108,10 +184,28 @@ export default function ProfileScreen() {
       <View style={styles.settingsSection}>
         <Text style={styles.sectionTitle}>Settings</Text>
         
-        <TouchableOpacity style={styles.settingItem}>
+        <TouchableOpacity 
+          style={styles.settingItem}
+          onPress={() => setIsSoundDropdownOpen(!isSoundDropdownOpen)}
+        >
           <Ionicons name="notifications" size={24} color="#666" />
           <Text style={styles.settingText}>Notification Settings</Text>
+          <Ionicons 
+            name={isSoundDropdownOpen ? 'chevron-up' : 'chevron-down'} 
+            size={20} 
+            color="#666" 
+          />
         </TouchableOpacity>
+
+        {isSoundDropdownOpen && (
+          <TouchableOpacity 
+            style={styles.dropdownItem}
+            onPress={handleTestSoundAlert}
+          >
+            <Ionicons name="volume-high" size={20} color="#666" />
+            <Text style={styles.dropdownText}>Test Sound Alert</Text>
+          </TouchableOpacity>
+        )}
 
         <TouchableOpacity style={styles.settingItem}>
           <Ionicons name="lock-closed" size={24} color="#666" />
@@ -197,6 +291,35 @@ const styles = StyleSheet.create({
     fontSize: 18,
     marginBottom: 15,
   },
+  editContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginBottom: 15,
+  },
+  input: {
+    flex: 1,
+    borderWidth: 1,
+    borderColor: '#ddd',
+    borderRadius: 5,
+    padding: 10,
+    marginRight: 10,
+  },
+  saveButton: {
+    backgroundColor: '#E26964',
+    padding: 10,
+    borderRadius: 5,
+  },
+  saveButtonText: {
+    color: '#fff',
+    fontSize: 16,
+  },
+  nameContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  editIcon: {
+    marginLeft: 10,
+  },
   settingsSection: {
     marginTop: 20,
   },
@@ -213,8 +336,9 @@ const styles = StyleSheet.create({
     borderBottomColor: '#eee',
   },
   settingText: {
+    flex: 1,
+    marginLeft: 10,
     fontSize: 16,
-    marginLeft: 15,
   },
   logoutButton: {
     flexDirection: 'row',
@@ -229,5 +353,15 @@ const styles = StyleSheet.create({
     color: '#fff',
     fontSize: 16,
     marginLeft: 10,
+  },
+  dropdownItem: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingVertical: 10,
+    paddingLeft: 40,
+  },
+  dropdownText: {
+    marginLeft: 10,
+    fontSize: 16,
   },
 }); 
