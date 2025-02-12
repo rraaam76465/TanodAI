@@ -106,6 +106,7 @@ export default function DashboardScreen() {
         <View style={styles.bentoBox}>
           <Text style={styles.boxTitle}>System Health</Text>
           <Text>All systems operational</Text>
+          <Text>Network Status: Connected</Text>
         </View>
 
         {/* Recent Alerts */}
@@ -203,12 +204,12 @@ const styles = StyleSheet.create({
     height: '100%',
   },
   boxTitle: {
-    fontSize: 18,
-    fontWeight: '600',
+    fontSize: 16,
+    fontWeight: '800',
     marginBottom: 10,
     color: '#333',
-    paddingHorizontal: 15,
-    paddingTop: 15,
+    paddingHorizontal: 0,
+    paddingTop: 5,
   },
   loadingText: {
     fontSize: 18,
