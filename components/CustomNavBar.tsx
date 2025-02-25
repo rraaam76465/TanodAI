@@ -1,20 +1,61 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { View, TouchableOpacity, StyleSheet, Text } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
+import { supabase } from '@/lib/supabase';
 
 const CustomNavBar = () => {
   const router = useRouter();
   const [activeTab, setActiveTab] = useState('index');
-  const [notificationCount, setNotificationCount] = useState(2); // Initial count
+  const [notificationCount, setNotificationCount] = useState(0); // Start with 0
+
+  // Add effect to listen for alerts
+  useEffect(() => {
+    // Fetch initial unread alerts count
+    const fetchUnreadAlerts = async () => {
+      const { data, error } = await supabase
+        .from('sensor_readings')
+        .select('count')
+        .eq('read', false)
+        .single();
+
+      if (data) {
+        setNotificationCount(data.count);
+      }
+    };
+
+    fetchUnreadAlerts();
+
+    // Subscribe to new alerts
+    const subscription = supabase
+      .channel('sensor_readings')
+      .on('postgres_changes', 
+        { event: 'INSERT', schema: 'public', table: 'sensor_readings' },
+        payload => {
+          if (payload.new.ai_fire_detected) {
+            setNotificationCount(prev => prev + 1);
+          }
+        }
+      )
+      .subscribe();
+
+    return () => {
+      subscription.unsubscribe();
+    };
+  }, []);
 
   const handleTabPress = (tab: string) => {
-    if (activeTab === tab) return; // Do nothing if the tab is already active
+    if (activeTab === tab) return;
     setActiveTab(tab);
     if (tab === 'index') {
       router.replace('/(dashboard)/');
     } else {
       router.replace(`/(dashboard)/${tab}`);
+    }
+
+    // Clear notification count when navigating to notifications
+    if (tab === 'notifications') {
+      setNotificationCount(0);
     }
   };
 
@@ -133,4 +174,4 @@ const styles = StyleSheet.create({
   },
 });
 
-export default CustomNavBar; 
+export default CustomNavBar;

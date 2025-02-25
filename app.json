@@ -5,9 +5,9 @@
     "version": "1.0.0",
     "orientation": "portrait",
     "icon": "./assets/images/splash-icon.png",
-    "scheme": "yourapp",
+    "scheme": "tanodai",  // Changed from "yourapp" to match app name
     "userInterfaceStyle": "automatic",
-    "newArchEnabled": true,
+    "newArchEnabled": false,  // Changed to false for Expo Go compatibility
     "ios": {
       "supportsTablet": true,
       "bundleIdentifier": "com.rraaam.TanodAI",
@@ -58,19 +58,10 @@
         "expo-notifications",
         {
           "icon": "./assets/images/notification-icon.png",
-          "color": "#E26964"
+          "color": "#E26964",
+          "sounds": ["./assets/sounds/alert.mp3"]
         }
       ]
-    ],
-    "experiments": {
-      "typedRoutes": true
-    },
-    "splash": {
-      "image": "./assets/images/splash-icon.png",
-      "resizeMode": "contain",
-      "backgroundColor": "#E26964",
-      "imageWidth": 200,
-      "imageHeight": 200
-    }
+    ]
   }
 }
