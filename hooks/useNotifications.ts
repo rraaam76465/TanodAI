@@ -62,7 +62,24 @@ async function registerForPushNotificationsAsync() {
 
   if (finalStatus !== 'granted') {
     console.log('Failed to get push token for push notification!');
+    alert('Failed to get push token for push notification!');
     return;
+  }
+
+  try {
+    // Get the Expo push token
+    const token = (await Notifications.getExpoPushTokenAsync({
+      // Optionally specify your Expo project ID if needed, usually inferred
+      // projectId: 'YOUR_EXPO_PROJECT_ID',
+    })).data;
+    console.log('Expo Push Token:', token);
+
+    // !!! IMPORTANT: Send this token to your backend (e.g., Supabase) !!!
+    // Example: await supabase.from('profiles').update({ push_token: token }).eq('id', userId);
+
+  } catch (error) {
+    console.error('Error getting Expo push token:', error);
+    alert('Error getting Expo push token: ' + error);
   }
 
   if (Platform.OS === 'android') {
@@ -71,6 +88,7 @@ async function registerForPushNotificationsAsync() {
       importance: Notifications.AndroidImportance.MAX,
       vibrationPattern: [0, 250, 250, 250],
       lightColor: '#FF231F7C',
+      sound: 'alert.mp3',
     });
   }
 }
