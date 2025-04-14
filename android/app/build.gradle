@@ -87,9 +87,9 @@ android {
     buildToolsVersion rootProject.ext.buildToolsVersion
     compileSdk rootProject.ext.compileSdkVersion
 
-    namespace 'com.rraaam.TanodAI'
+    namespace 'com.rraaam.tanodai'
     defaultConfig {
-        applicationId 'com.rraaam.TanodAI'
+        applicationId 'com.rraaam.tanodai'
         minSdkVersion rootProject.ext.minSdkVersion
         targetSdkVersion rootProject.ext.targetSdkVersion
         versionCode 1

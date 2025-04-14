@@ -1,4 +1,4 @@
-package com.rraaam.TanodAI
+package com.rraaam.tanodai
 import expo.modules.splashscreen.SplashScreenManager
 
 import android.os.Build
