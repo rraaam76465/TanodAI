@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import {
   View,
   Text,
@@ -14,42 +14,83 @@ import {
 import { Ionicons } from '@expo/vector-icons';
 import { supabase } from '@/lib/supabase';
 import { DetectionDetails } from '@/components/DetectionDetails';
-import * as Notifications from 'expo-notifications';
 
 // Add this constant at the top after imports
-const FLASK_SERVER_URL = 'http://172.16.44.151:5005';
+// TODO: Move to environment variables
+const FLASK_SERVER_URL = 'http://192.168.1.5:5005'; 
+
+// Define type for consistency with index.tsx
+interface SensorReading {
+  id: number;
+  timestamp: string;
+  temperature?: number; // Optional fields based on your select
+  humidity?: number;
+  mq2_value?: number;
+  ai_fire_detected?: boolean; // Use consistent naming
+  smoke_detected?: boolean; // Use consistent naming
+  flame_sensor?: boolean; // Keep if used separately
+  camera_id?: string;
+  camera_ip?: string;
+  location?: string;
+  acknowledged?: boolean;
+  ignored?: boolean;
+  image_url?: string;
+}
 
 export default function NotificationsScreen() {
   const [serverStatus, setServerStatus] = useState(false);
-  const [notifications, setNotifications] = useState([]);
-  const [selectedAlert, setSelectedAlert] = useState(null);
+  const [notifications, setNotifications] = useState<SensorReading[]>([]);
+  const [selectedAlert, setSelectedAlert] = useState<SensorReading | null>(null);
   const [showDetails, setShowDetails] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
 
-  const onRefresh = React.useCallback(() => {
+  // Define fetchNotifications outside useEffect so it can be called by onRefresh
+  const fetchNotifications = useCallback(async () => {
+    console.log('Attempting to fetch sensor readings...');
+    try {
+      const { data, error } = await supabase
+        .from('sensor_readings')
+        .select(`
+          id,
+          timestamp,
+          temperature,
+          humidity,
+          mq2_value,
+          ai_fire_detected,
+          smoke_detected,
+          flame_sensor,
+          camera_id,
+          camera_ip,
+          location,
+          acknowledged,
+          ignored,
+          image_url
+        `)
+        .eq('ignored', false)
+        .order('timestamp', { ascending: false });
+
+      console.log('Supabase Fetch Response:', { data, error });
+
+      if (error) {
+        console.error('Supabase Fetch Error:', error);
+        Alert.alert('Error', 'Failed to fetch notifications');
+        // Don't throw here to allow component to render potentially cached data
+      } else if (data) {
+        console.log('Number of records found:', data.length);
+        setNotifications(data as SensorReading[]);
+      }
+    } catch (error) {
+      console.error('Fetch error caught:', error);
+      Alert.alert('Error', 'Failed to fetch notifications');
+    }
+  }, []); // useCallback dependency array
+
+  const onRefresh = useCallback(() => {
     setRefreshing(true);
     fetchNotifications().finally(() => setRefreshing(false));
-  }, []);
+  }, [fetchNotifications]); // Add fetchNotifications as dependency
 
-  useEffect(() => {
-    fetchNotifications();
-    
-    const subscription = supabase
-      .channel('sensor_readings')
-      .on('postgres_changes', 
-        { event: 'INSERT', schema: 'public', table: 'sensor_readings' },
-        payload => {
-          if (payload.new.fire_detected) {
-            setNotifications(current => [payload.new, ...current]);
-          }
-        }
-      )
-      .subscribe();
-
-    return () => subscription.unsubscribe();
-  }, []);
-
-  const handleAcknowledge = async (id) => {
+  const handleAcknowledge = async (id: number) => {
     try {
       const { error } = await supabase
         .from('sensor_readings')
@@ -63,6 +104,7 @@ export default function NotificationsScreen() {
           notif.id === id ? { ...notif, acknowledged: true } : notif
         )
       );
+      setSelectedAlert(null); // Clear selected alert
       setShowDetails(false);
     } catch (error) {
       console.error('Error acknowledging alert:', error);
@@ -70,7 +112,7 @@ export default function NotificationsScreen() {
     }
   };
 
-  const handleIgnore = async (id) => {
+  const handleIgnore = async (id: number) => {
     try {
       const { error } = await supabase
         .from('sensor_readings')
@@ -80,10 +122,9 @@ export default function NotificationsScreen() {
       if (error) throw error;
       
       setNotifications(current =>
-        current.map(notif =>
-          notif.id === id ? { ...notif, ignored: true } : notif
-        )
+        current.filter(notif => notif.id !== id) // Remove ignored notification from list
       );
+      setSelectedAlert(null); // Clear selected alert
       setShowDetails(false);
     } catch (error) {
       console.error('Error ignoring alert:', error);
@@ -109,238 +150,185 @@ export default function NotificationsScreen() {
     return () => clearInterval(interval);
   }, []);
 
-  // Update the fetchNotifications function
-  // Update fetchNotifications to get unignored notifications
-  const fetchNotifications = async () => {
-    try {
-      // Test connection and table access
-      console.log('Attempting to fetch sensor readings...');
-      
-      const { data, error } = await supabase
-        .from('sensor_readings')
-        .select(`
-          id,
-          timestamp,
-          temperature,
-          humidity,
-          mq2_value,
-          fire_detected,
-          flame_sensor,
-          camera_id,
-          camera_ip,
-          location,
-          acknowledged,
-          ignored,
-          image_url
-        `)
-        .order('timestamp', { ascending: false });
-      
-      console.log('Supabase Response:', { data, error });
-      
-      if (error) {
-        console.error('Supabase Error:', error);
-        throw error;
-      }
-      
-      if (data) {
-        console.log('Number of records found:', data.length);
-        const activeNotifications = data
-          .filter(notification => !notification.ignored)
-          .map(notification => ({
-            ...notification,
-            flame_detected: notification.fire_detected || notification.flame_sensor,
-            timestamp: notification.timestamp || new Date().toISOString()
-          }));
-        
-        console.log('Processed notifications:', activeNotifications);
-        setNotifications(activeNotifications);
-      }
-    } catch (error) {
-      console.error('Fetch error:', error);
-      Alert.alert('Error', 'Failed to fetch notifications');
-    }
-  };
-
-  // Update the subscription to handle new readings
+  // Combined fetch and subscribe effect
   useEffect(() => {
+    let isMounted = true;
+    let realtimeChannel: any = null;
+
+    // Initial fetch when component mounts
     fetchNotifications();
-    
-    const subscription = supabase
-      .channel('sensor_readings')
-      .on('postgres_changes', 
-        { event: '*', schema: 'public', table: 'sensor_readings' }, // Listen to all changes
-        payload => {
-          console.log('Realtime event received:', payload);
-          
-          if (payload.eventType === 'INSERT') {
-            const newNotification = {
-              ...payload.new,
-              timestamp: payload.new.timestamp || new Date().toISOString()
-            };
-            setNotifications(current => [newNotification, ...current]);
+
+    // Setup subscription
+    realtimeChannel = supabase
+      .channel('public:sensor_readings')
+      .on<SensorReading>(
+        'postgres_changes',
+        { event: '*', schema: 'public', table: 'sensor_readings' },
+        (payload) => {
+          if (!isMounted) return;
+          console.log('Realtime event:', payload);
+
+          switch (payload.eventType) {
+            case 'INSERT':
+              const newNotification = payload.new as SensorReading;
+              if (!newNotification.ignored) {
+                // Add to the beginning of the list, prevent duplicates
+                setNotifications(current => 
+                  current.find(n => n.id === newNotification.id) 
+                  ? current 
+                  : [newNotification, ...current]
+                );
+              }
+              break;
+            case 'UPDATE':
+              const updatedNotification = payload.new as SensorReading;
+              setNotifications(current => {
+                if (updatedNotification.ignored) {
+                  // Remove if ignored
+                  return current.filter(n => n.id !== updatedNotification.id);
+                } else {
+                  // Update if acknowledged or other change
+                  return current.map(n => n.id === updatedNotification.id ? updatedNotification : n);
+                }
+              });
+              break;
+            case 'DELETE':
+              const oldNotification = payload.old as Partial<SensorReading>; // OLD record only has primary key by default
+              if (oldNotification.id) {
+                 setNotifications(current => current.filter(n => n.id !== oldNotification.id));
+              }
+              break;
+            default:
+              break;
           }
         }
       )
-      .subscribe();
-
-    return () => subscription.unsubscribe();
-  }, []);
-
-  // Update the subscription to log more details
-  useEffect(() => {
-    fetchNotifications();
-    
-    const subscription = supabase
-      .channel('sensor_readings')
-      .on('postgres_changes', 
-        { event: 'INSERT', schema: 'public', table: 'sensor_readings' },
-        payload => {
-          console.log('Realtime update received:', payload);
-          if (payload.new) {
-            setNotifications(current => [payload.new, ...current]);
-          }
+      .subscribe((status, err) => {
+        if (err) {
+          console.error("Supabase Subscription Error:", err);
+        } else {
+          console.log("Supabase Subscription Status:", status);
         }
-      )
-      .subscribe();
+      });
 
-    // Log when subscription is established
-    console.log('Supabase subscription initialized');
-
+    // Cleanup function
     return () => {
-      console.log('Cleaning up subscription');
-      subscription.unsubscribe();
+      isMounted = false;
+      if (realtimeChannel) {
+        supabase.removeChannel(realtimeChannel);
+        console.log('Supabase channel removed');
+      }
     };
-  }, []);
 
-  // Update the subscription handler (remove duplicate subscriptions)
-  useEffect(() => {
-    fetchNotifications();
-    
-    const subscription = supabase
-      .channel('sensor_readings')
-      .on('postgres_changes', 
-        { event: 'INSERT', schema: 'public', table: 'sensor_readings' },
-        payload => {
-          console.log('New sensor reading:', payload.new);
-          if (payload.new && !payload.new.ignored) {
-            const newNotification = {
-              ...payload.new,
-              flame_detected: payload.new.fire_detected || payload.new.flame_sensor,
-              timestamp: payload.new.timestamp || new Date().toISOString()
-            };
-            setNotifications(current => [newNotification, ...current]);
-          }
-        }
-      )
-      .subscribe();
+  }, [fetchNotifications]); // Add fetchNotifications as dependency
 
-    console.log('Supabase subscription initialized');
-    return () => subscription.unsubscribe();
-  }, []);
-
-  // Update the notification card render
-  const renderNotificationCard = (notification) => (
+  const renderNotificationCard = (notification: SensorReading) => (
     <View key={notification.id} style={styles.notificationCard}>
       <View style={styles.iconContainer}>
         <Ionicons 
-          name={notification.flame_detected ? "flame" : "warning"} 
+          // Use ai_fire_detected and smoke_detected for consistency
+          name={notification.ai_fire_detected ? "flame" : (notification.smoke_detected ? "cloud" : "warning")} 
           size={24} 
-          color={notification.flame_detected ? "#ff0000" : "#ffa500"} 
+          color={notification.ai_fire_detected ? "#ff0000" : (notification.smoke_detected ? "#ffa500" : "#f0e68c")}
         />
       </View>
       
-      <Text style={styles.alertTitle}>
-        {notification.flame_detected ? 'Fire Detected!' : 'High Smoke Level'}
-      </Text>
+      <TouchableOpacity 
+        style={styles.textContainer}
+        onPress={() => { setSelectedAlert(notification); setShowDetails(true); }}
+      >
+        <Text style={styles.notificationTitle}>
+          {notification.ai_fire_detected ? 'Fire Detected' : (notification.smoke_detected ? 'Smoke Detected' : 'Sensor Alert')}
+        </Text>
+        <Text style={styles.notificationTimestamp}>
+          {getRelativeTime(notification.timestamp)}
+        </Text>
+        <Text style={styles.notificationLocation} numberOfLines={1}>
+          Location: {notification.location || 'N/A'}
+        </Text>
+      </TouchableOpacity>
       
-      <Text style={styles.timeText}>
-        {new Date(notification.timestamp).toLocaleString()}
-      </Text>
-
-      <View style={styles.detailsContainer}>
-        <Text style={styles.detailText}>
-          Temperature: {notification.temperature}°C
-        </Text>
-        <Text style={styles.detailText}>
-          Smoke Level: {notification.mq2_value}
-        </Text>
-        {notification.acknowledged && (
-          <Text style={[styles.detailText, { color: '#4CAF50' }]}>
-            ✓ Acknowledged
-          </Text>
-        )}
-      </View>
-
-      <View style={styles.buttonContainer}>
+      <View style={styles.actionContainer}>
         {!notification.acknowledged && (
-          <TouchableOpacity
-            style={[styles.actionButton, styles.acknowledgeButton]}
+          <TouchableOpacity 
+            style={styles.actionButton}
             onPress={() => handleAcknowledge(notification.id)}
           >
-            <Text style={styles.actionButtonText}>Acknowledge</Text>
+            <Ionicons name="checkmark-circle" size={24} color="#4CAF50" />
           </TouchableOpacity>
         )}
-        
-        <TouchableOpacity
-          style={[styles.actionButton, styles.ignoreButton]}
+        <TouchableOpacity 
+          style={styles.actionButton}
           onPress={() => handleIgnore(notification.id)}
         >
-          <Text style={styles.actionButtonText}>Dismiss</Text>
+          <Ionicons name="eye-off" size={24} color="#9E9E9E" />
         </TouchableOpacity>
       </View>
     </View>
   );
 
-  // Add this debug effect
-  useEffect(() => {
-    console.log('Current notifications state:', notifications);
-  }, [notifications]);
-
   return (
-    <SafeAreaView style={styles.container}>
+    <SafeAreaView style={styles.safeArea}>
       <StatusBar barStyle="dark-content" />
       <View style={styles.header}>
-        <Text style={styles.headerTitle}>Notifications</Text>
+        <Text style={styles.title}>Notifications</Text>
+        <View style={[styles.serverStatusDot, { backgroundColor: serverStatus ? '#4CAF50' : '#f44336' }]} />
       </View>
-
+      
       <ScrollView
         style={styles.scrollView}
         refreshControl={
-          <RefreshControl
-            refreshing={refreshing}
-            onRefresh={onRefresh}
-            tintColor="#E26964"
-          />
+          <RefreshControl refreshing={refreshing} onRefresh={onRefresh} />
         }
       >
         {notifications.length === 0 ? (
-          <View style={styles.emptyContainer}>
-            <Ionicons name="notifications-outline" size={64} color="#ccc" />
-            <Text style={styles.emptyText}>No notifications yet</Text>
+          <View style={styles.noNotificationsContainer}>
+            <Ionicons name="notifications-off-outline" size={64} color="#ccc" />
+            <Text style={styles.noNotificationsText}>No active notifications</Text>
           </View>
         ) : (
-          notifications.map(notification => renderNotificationCard(notification))
+          notifications.map(renderNotificationCard)
         )}
       </ScrollView>
+
+      {selectedAlert && (
+        <DetectionDetails 
+          visible={showDetails}
+          onClose={() => { setShowDetails(false); setSelectedAlert(null); }}
+          data={selectedAlert}
+          onAcknowledge={() => handleAcknowledge(selectedAlert.id)}
+          onIgnore={() => handleIgnore(selectedAlert.id)}
+        />
+      )}
     </SafeAreaView>
   );
 }
 
-// Helper function for relative time
-const getRelativeTime = (timestamp) => {
+const getRelativeTime = (timestamp: string): string => {
   const now = new Date();
-  const date = new Date(timestamp);
-  const diff = now.getTime() - date.getTime();
-  const hours = Math.floor(diff / (1000 * 60 * 60));
-  
-  if (hours < 24) {
-    return `Today - ${date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}`;
+  const past = new Date(timestamp);
+  const diffInSeconds = Math.floor((now.getTime() - past.getTime()) / 1000);
+
+  const intervals = [
+    { label: 'year', seconds: 31536000 },
+    { label: 'month', seconds: 2592000 },
+    { label: 'day', seconds: 86400 },
+    { label: 'hour', seconds: 3600 },
+    { label: 'minute', seconds: 60 },
+    { label: 'second', seconds: 1 },
+  ];
+
+  for (const interval of intervals) {
+    const count = Math.floor(diffInSeconds / interval.seconds);
+    if (count >= 1) {
+      return `${count} ${interval.label}${count > 1 ? 's' : ''} ago`;
+    }
   }
-  return `Yesterday - ${date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}`;
+  return 'just now';
 };
 
 const styles = StyleSheet.create({
-  container: {
+  safeArea: {
     flex: 1,
     backgroundColor: '#fff',
   },
@@ -351,17 +339,29 @@ const styles = StyleSheet.create({
     padding: 20,
     paddingTop: 10,
   },
-  headerTitle: {
+  title: {
     fontSize: 32,
     fontWeight: 'bold',
   },
-  profileButton: {
-    width: 40,
-    height: 40,
-    borderRadius: 20,
-    backgroundColor: '#f0f0f0',
+  serverStatusDot: {
+    width: 12,
+    height: 12,
+    borderRadius: 6,
+  },
+  scrollView: {
+    flex: 1,
+    paddingHorizontal: 16,
+  },
+  noNotificationsContainer: {
+    flex: 1,
     justifyContent: 'center',
     alignItems: 'center',
+    paddingTop: 100,
+  },
+  noNotificationsText: {
+    fontSize: 16,
+    color: '#666',
+    marginTop: 12,
   },
   notificationCard: {
     margin: 20,
@@ -384,80 +384,23 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     marginBottom: 16,
   },
-  alertTitle: {
+  textContainer: {
+    flex: 1,
+    marginLeft: 16,
+  },
+  notificationTitle: {
     fontSize: 20,
     fontWeight: '600',
     marginBottom: 8,
   },
-  timeText: {
+  notificationTimestamp: {
     color: '#666',
     marginBottom: 24,
   },
-  circleContainer: {
-    position: 'relative',
-    width: 200,
-    height: 200,
-    alignItems: 'center',
-    justifyContent: 'center',
-    marginBottom: 24,
-  },
-  circle: {
-    position: 'absolute',
-    backgroundColor: '#ff0000',
-    borderRadius: 100,
-    width: '100%',
-    height: '100%',
-    transform: [{scale: 0.4}],
-  },
-  detailsButton: {
-    width: '100%',
-    padding: 16,
-    backgroundColor: '#fff',
-    borderRadius: 12,
-    alignItems: 'center',
-    marginBottom: 8,
-  },
-  detailsButtonText: {
-    fontSize: 16,
-    fontWeight: '600',
-  },
-  dismissButton: {
-    width: '100%',
-    padding: 16,
-    alignItems: 'center',
-  },
-  dismissButtonText: {
+  notificationLocation: {
     color: '#666',
-    fontSize: 16,
   },
-  scrollView: {
-    flex: 1,
-    paddingHorizontal: 16,
-  },
-  emptyContainer: {
-    flex: 1,
-    justifyContent: 'center',
-    alignItems: 'center',
-    paddingTop: 100,
-  },
-  emptyText: {
-    fontSize: 16,
-    color: '#666',
-    marginTop: 12,
-  },
-  detailsContainer: {
-    width: '100%',
-    marginVertical: 12,
-    padding: 16,
-    backgroundColor: 'rgba(0,0,0,0.05)',
-    borderRadius: 8,
-  },
-  detailText: {
-    fontSize: 14,
-    color: '#666',
-    marginBottom: 4,
-  },
-  buttonContainer: {
+  actionContainer: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     width: '100%',
@@ -469,15 +412,5 @@ const styles = StyleSheet.create({
     borderRadius: 8,
     marginHorizontal: 4,
     alignItems: 'center',
-  },
-  acknowledgeButton: {
-    backgroundColor: '#4CAF50',
-  },
-  ignoreButton: {
-    backgroundColor: '#f44336',
-  },
-  actionButtonText: {
-    color: '#fff',
-    fontWeight: '600',
   },
 });

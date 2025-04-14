@@ -7,101 +7,143 @@ import { Tabs } from 'expo-router';
 import { IconSymbol } from '@/components/ui/IconSymbol';
 import { Colors } from '@/constants/Colors';
 import { useColorScheme } from '@/hooks/useColorScheme';
-import { router, useRouter } from 'expo-router';
+import { useRouter } from 'expo-router';
 import { supabase } from '@/lib/supabase';
-import * as Location from 'expo-location';
-import mqtt from 'precompiled-mqtt';
+import Geolocation from 'react-native-geolocation-service';
 import { DetectionAlert } from '@/components/DetectionAlert';
-import * as Notifications from 'expo-notifications';
 
 const { width } = Dimensions.get('window');
 
-interface User {
-  user_metadata?: {
+interface SensorReading {
+  id: number;
+  timestamp: string;
+  ai_fire_detected: boolean;
+  smoke_detected: boolean;
+}
+
+interface AuthState {
+  user: {
+    id: string;
+    email?: string;
+    user_metadata?: {
+      firstName?: string;
+      name?: string;
+    };
+  } | null;
+}
+
+interface UserMetadata {
     firstName?: string;
-  };
+    name?: string;
 }
 
 export default function DashboardScreen() {
-  const { user } = useAuth() as User;
+  const { user: authUser } = useAuth() as AuthState;
   const { weather, loading, error } = useWeather();
   const colorScheme = useColorScheme();
   const router = useRouter();
   const [profileImage, setProfileImage] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(false);
-  const [name, setName] = useState('User');
+  const [name, setName] = useState(authUser?.user_metadata?.name || authUser?.user_metadata?.firstName || 'User');
   const [systemStatus, setSystemStatus] = useState({
     operational: false,
     networkConnected: true,
     lastCheck: new Date(),
   });
 
-  // Replace the device status check with sensor readings check
   useEffect(() => {
-    // Update the checkDeviceStatus function
-    // Replace the checkDeviceStatus function
-    // Fix the checkDeviceStatus function
-      const checkDeviceStatus = async () => {
-        try {
-          const { data, error } = await supabase
-            .from('sensor_readings')
-            .select('*')
-            .order('timestamp', { ascending: false })
-            .limit(1);
-          
-          if (error) throw error;
-          
-          // Check if we have recent data (within last 60 seconds)
-          const isRecent = data?.[0] && 
-            (new Date().getTime() - new Date(data[0].timestamp).getTime()) < 60000;
-          
-          setSystemStatus(current => ({
-            ...current,
-            operational: Boolean(data?.[0]),  // Set operational if we have any data
-            networkConnected: true,
-            lastCheck: new Date()
-          }));
-        } catch (error) {
-          console.error('Error checking sensor status:', error);
-          setSystemStatus(current => ({
-            ...current,
-            operational: false,
-            networkConnected: false,
-            lastCheck: new Date()
-          }));
-        }
-      };
+    const checkDeviceStatus = async () => {
+      try {
+        const { data, error } = await supabase
+          .from('sensor_readings')
+          .select('*')
+          .order('timestamp', { ascending: false })
+          .limit(1);
+        
+        if (error) throw error;
+        
+        const isRecent = data?.[0] && 
+          (new Date().getTime() - new Date(data[0].timestamp).getTime()) < 60000;
+        
+        setSystemStatus(current => ({
+          ...current,
+          operational: Boolean(data?.[0]),
+          networkConnected: true,
+          lastCheck: new Date()
+        }));
+      } catch (error) {
+        console.error('Error checking sensor status:', error);
+        setSystemStatus(current => ({
+          ...current,
+          operational: false,
+          networkConnected: false,
+          lastCheck: new Date()
+        }));
+      }
+    };
     
-    // Initial check
     checkDeviceStatus();
 
-    // Check every 10 seconds
     const interval = setInterval(checkDeviceStatus, 10000);
     return () => clearInterval(interval);
   }, []);
 
-  // Remove the separate device status subscription and keep the sensor readings one
+  const [recentAlerts, setRecentAlerts] = useState<SensorReading[]>([]);
+
+  // Add back the Supabase subscription useEffect for real-time updates
   useEffect(() => {
-    const subscription = supabase
-      .channel('sensor_readings')
-      .on('postgres_changes', 
+    // Fetch initial alerts
+    const fetchInitialAlerts = async () => {
+      const { data, error } = await supabase
+        .from('sensor_readings')
+        .select('*')
+        .order('timestamp', { ascending: false })
+        .limit(3); // Fetch last 3
+      if (error) {
+          console.error("Error fetching initial alerts:", error);
+      } else if (data) {
+          setRecentAlerts(data as SensorReading[]);
+      }
+    };
+
+    fetchInitialAlerts();
+
+    // Set up real-time subscription
+    const sensorReadingsChannel = supabase
+      .channel('dashboard-sensor-readings') // Unique channel name
+      .on<SensorReading>(
+        'postgres_changes',
         { event: 'INSERT', schema: 'public', table: 'sensor_readings' },
-        payload => {
-          setRecentAlerts(current => [payload.new, ...current].slice(0, 3));
-          
+        (payload) => {
+          console.log('New reading received:', payload.new);
+          const newAlert = payload.new as SensorReading;
+          setRecentAlerts(currentAlerts => 
+            [newAlert, ...currentAlerts].slice(0, 3) // Add new alert and keep only 3
+          );
+          // Optionally update system status based on new alert
           setSystemStatus(current => ({
             ...current,
+            operational: !(newAlert.ai_fire_detected || newAlert.smoke_detected), // Example logic
+            networkConnected: true, // Assume connected if we received an update
             lastCheck: new Date(),
-            operational: true,
-            networkConnected: true
           }));
         }
       )
-      .subscribe();
+      .subscribe((status, err) => {
+         if (err) {
+            console.error("Supabase subscription error:", err);
+         } else {
+            console.log("Supabase subscription status:", status);
+         }
+      });
 
-    return () => subscription.unsubscribe();
-  }, []);
-  const [recentAlerts, setRecentAlerts] = useState([]);
+    // Cleanup subscription on component unmount
+    return () => {
+      supabase.removeChannel(sensorReadingsChannel);
+      console.log("Removed Supabase channel");
+    };
+  }, []); // Empty dependency array means this runs once on mount
+
   const [region, setRegion] = useState({
     latitude: 37.78825,
     longitude: -122.4324,
@@ -110,121 +152,36 @@ export default function DashboardScreen() {
   });
 
   const getUserInitial = () => {
-    return user?.raw_user_meta_data?.name?.charAt(0) || 'U';
+    const userMetadata = authUser?.user_metadata as UserMetadata | undefined;
+    return userMetadata?.name?.charAt(0) || userMetadata?.firstName?.charAt(0) || 'U';
   };
 
   useEffect(() => {
-    const fetchSession = async () => {
-      const { data: { session } } = await supabase.auth.getSession();
-      if (session?.user?.user_metadata?.name) {
-        setName(session.user.user_metadata.name);
-      }
-    };
-    fetchSession();
-  }, []);
-
-  useEffect(() => {
     const fetchLocation = async () => {
-      const { status } = await Location.requestForegroundPermissionsAsync();
-      if (status !== 'granted') {
-        Alert.alert('Permission denied', 'Location permission is required to show the map.');
-        return;
-      }
-
-      const location = await Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.High });
-      setRegion({
-        latitude: location.coords.latitude,
-        longitude: location.coords.longitude,
-        latitudeDelta: 0.0922,
-        longitudeDelta: 0.0421,
+      Geolocation.requestAuthorization('whenInUse').then(result => {
+          if (result === 'granted') {
+              Geolocation.getCurrentPosition(
+                  (position) => {
+                      setRegion({
+                          latitude: position.coords.latitude,
+                          longitude: position.coords.longitude,
+                          latitudeDelta: 0.015,
+                          longitudeDelta: 0.0121,
+                      });
+                  },
+                  (error) => {
+                      Alert.alert('Location Error', error.message);
+                      console.log(error.code, error.message);
+                  },
+                  { enableHighAccuracy: true, timeout: 15000, maximumAge: 10000 }
+              );
+          } else {
+              Alert.alert('Permission denied', 'Location permission is required to show the map.');
+          }
       });
     };
 
     fetchLocation();
-  }, []);
-
-  // Update the subscription useEffect
-  // At the top of your file, add this
-  useEffect(() => {
-    // Request notification permissions
-    const requestPermissions = async () => {
-      const { status } = await Notifications.requestPermissionsAsync();
-      if (status !== 'granted') {
-        Alert.alert('Permission needed', 'Please enable notifications to receive alerts');
-      }
-    };
-    // Add this before the DashboardScreen component
-    Notifications.setNotificationHandler({
-      handleNotification: async () => ({
-        shouldShowAlert: true,
-        shouldPlaySound: true,
-        shouldSetBadge: true,
-      }),
-    });
-    requestPermissions();
-  }, []);
-
-  // Modify your sensor readings subscription
-  // In your sensor readings subscription
-  useEffect(() => {
-    const subscription = supabase
-      .channel('sensor_readings')
-      .on('postgres_changes', 
-        { event: 'INSERT', schema: 'public', table: 'sensor_readings' },
-        async (payload) => {
-          if (payload.new.ai_fire_detected || payload.new.smoke_detected) {
-            try {
-              // Local notification
-              await Notifications.scheduleNotificationAsync({
-                content: {
-                  title: payload.new.ai_fire_detected ? "🚨 Fire Alert!" : "⚠️ Smoke Alert",
-                  body: `${payload.new.ai_fire_detected ? "Fire" : "Smoke"} has been detected in your area.`,
-                },
-                trigger: null,
-              });
-    
-              // Call Edge Function for email alert
-              const { data, error } = await supabase.functions.invoke('test-alert', {
-                body: { 
-                  email: user?.email,
-                  alert_type: payload.new.ai_fire_detected ? 'fire' : 'smoke',
-                  location: `${region.latitude}, ${region.longitude}`
-                }
-              });
-
-              if (error) {
-                console.error('Error sending alert:', error);
-              }
-            } catch (error) {
-              console.error('Error processing alert:', error);
-            }
-          }
-          
-          setRecentAlerts(current => [payload.new, ...current].slice(0, 3));
-          setSystemStatus(current => ({
-            ...current,
-            lastCheck: new Date(),
-            operational: !payload.new.ai_fire_detected,
-          }));
-        }
-      )
-      .subscribe();
-  
-    // Fetch initial alerts
-    const fetchAlerts = async () => {
-      const { data } = await supabase
-        .from('sensor_readings')
-        .select('*')
-        .order('timestamp', { ascending: false })
-        .limit(3);
-      if (data) setRecentAlerts(data as Array<{
-        timestamp: number;
-        ai_fire_detected: boolean;
-      }>);
-    };
-  
-    fetchAlerts();
-    return () => subscription.unsubscribe();
   }, []);
 
   return (
@@ -279,14 +236,14 @@ export default function DashboardScreen() {
         <View style={styles.bentoBox}>
           <Text style={styles.boxTitle}>Recent Alerts</Text>
           {recentAlerts.length > 0 ? (
-            recentAlerts.map((alert, index) => (
-              <View key={index} style={styles.alertItem}>
-                <View style={[styles.alertDot, { backgroundColor: alert.ai_fire_detected ? '#f44336' : '#FFA726' }]} />
+            recentAlerts.map((alert) => (
+              <View key={alert.id} style={styles.alertItem}>
+                <View style={[styles.alertDot, { backgroundColor: alert.ai_fire_detected ? '#f44336' : (alert.smoke_detected ? '#FFA726' : '#9E9E9E') }]} />
                 <Text style={styles.alertText} numberOfLines={1}>
-                  {alert.ai_fire_detected ? 'Fire' : 'Smoke'} detected
+                  {alert.ai_fire_detected ? 'Fire' : (alert.smoke_detected ? 'Smoke' : 'Sensor')} detected
                 </Text>
                 <Text style={styles.alertTime}>
-                  {new Date(alert.timestamp * 1000).toLocaleTimeString()}
+                  {new Date(alert.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
                 </Text>
               </View>
             ))
@@ -312,7 +269,7 @@ export default function DashboardScreen() {
           </View>
           <View style={styles.analyticsContainer}>
             <Text style={styles.analyticsValue}>{recentAlerts.length}</Text>
-            <Text style={styles.analyticsLabel}>Today's Alerts</Text>
+            <Text style={styles.analyticsLabel}>Recent Alerts</Text>
           </View>
         </View>
       </View>
@@ -320,13 +277,12 @@ export default function DashboardScreen() {
   );
 }
 
-// Update the container style to adjust padding and content positioning
 const styles = StyleSheet.create({
   container: {
     flex: 1,
     padding: 20,
-    paddingTop: 50, // Reduced from 60
-    paddingBottom: 120, // Increased from 80 to account for tab bar
+    paddingTop: 50,
+    paddingBottom: 120,
     backgroundColor: '#fff',
   },
   header: {
@@ -352,7 +308,7 @@ const styles = StyleSheet.create({
     backgroundColor: '#f5f5f5',
     borderRadius: 15,
     padding: 20,
-    marginBottom: 20, // Reduced from 50
+    marginBottom: 20,
     alignItems: 'center',
   },
   temperature: {
@@ -370,15 +326,15 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     flexWrap: 'wrap',
     justifyContent: 'space-between',
-    marginBottom: 20, // Added margin bottom
+    marginBottom: 20,
   },
   bentoBox: {
     width: '48%',
     backgroundColor: '#F9F9F9',
     borderRadius: 15,
     padding: 15,
-    marginBottom: 12, // Reduced from 15
-    minHeight: 140, // Reduced from 150
+    marginBottom: 12,
+    minHeight: 140,
   },
   mapBentoBox: {
     width: '48%',
@@ -386,6 +342,7 @@ const styles = StyleSheet.create({
     borderRadius: 15,
     overflow: 'hidden',
     aspectRatio: 1,
+    marginBottom: 12,
   },
   map: {
     width: '100%',
@@ -393,7 +350,7 @@ const styles = StyleSheet.create({
   },
   boxTitle: {
     fontSize: 16,
-    fontWeight: '800',
+    fontWeight: 'bold',
     marginBottom: 10,
     color: '#333',
     paddingHorizontal: 0,
@@ -411,7 +368,7 @@ const styles = StyleSheet.create({
     width: 50,
     height: 50,
     borderRadius: 25,
-    backgroundColor: '#E26964',
+    backgroundColor: Colors.light.tint,
     justifyContent: 'center',
     alignItems: 'center',
   },
@@ -446,7 +403,8 @@ const styles = StyleSheet.create({
   lastCheck: {
     fontSize: 12,
     color: '#999',
-    marginTop: 8,
+    marginTop: 'auto',
+    paddingTop: 8,
   },
   alertItem: {
     flexDirection: 'row',
@@ -463,6 +421,7 @@ const styles = StyleSheet.create({
     flex: 1,
     fontSize: 14,
     color: '#333',
+    marginRight: 4,
   },
   alertTime: {
     fontSize: 12,
@@ -471,19 +430,23 @@ const styles = StyleSheet.create({
   noAlertsText: {
     color: '#666',
     fontStyle: 'italic',
+    marginTop: 10,
   },
   analyticsContainer: {
+    flexDirection: 'row',
+    alignItems: 'baseline',
+    justifyContent: 'center',
     marginTop: 10,
-    alignItems: 'center',
+    marginBottom: 5,
   },
   analyticsValue: {
     fontSize: 24,
     fontWeight: 'bold',
     color: '#333',
+    marginRight: 8,
   },
   analyticsLabel: {
     fontSize: 12,
     color: '#666',
-    marginTop: 4,
   },
 });

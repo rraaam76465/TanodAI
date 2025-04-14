@@ -5,33 +5,52 @@ import * as ImageManipulator from 'expo-image-manipulator';
 import { useAuth } from '@/hooks/useAuth';
 import { Ionicons } from '@expo/vector-icons';
 import { supabase } from '@/lib/supabase';
-import { Audio } from 'expo-av';
-import * as Notifications from 'expo-notifications';
 import { SafeAreaView } from 'react-native';
 
+interface AuthState {
+  user: {
+    id: string;
+    email?: string;
+    user_metadata?: { 
+      firstName?: string;
+      name?: string;
+      avatar_url?: string;
+    };
+    raw_user_meta_data?: { 
+      firstName?: string;
+      name?: string;
+      avatar_url?: string;
+    };
+  } | null;
+  logout: () => Promise<void>;
+}
+
 export default function ProfileScreen() {
-  const { user, logout } = useAuth();
+  const { user, logout } = useAuth() as AuthState;
   const [isLoading, setIsLoading] = useState(false);
   const [isEditing, setIsEditing] = useState(false);
-  const [name, setName] = useState(user?.raw_user_meta_data?.name || 'User');
-  const [profileImage, setProfileImage] = useState(null);
+  const [name, setName] = useState(user?.user_metadata?.name || user?.raw_user_meta_data?.name || 'User');
+  const [profileImage, setProfileImage] = useState<string | null>(null);
   const [isSoundDropdownOpen, setIsSoundDropdownOpen] = useState(false);
 
   useEffect(() => {
-    if (user?.raw_user_meta_data?.name) {
-      setName(user.raw_user_meta_data.name);
+    const currentName = user?.user_metadata?.name || user?.raw_user_meta_data?.name;
+    if (currentName) {
+      setName(currentName);
     }
     fetchProfileImage();
   }, [user]);
 
   const fetchProfileImage = async () => {
-    if (user?.raw_user_meta_data?.avatar_url) {
-      setProfileImage(user.raw_user_meta_data.avatar_url);
+    const avatarUrl = user?.user_metadata?.avatar_url || user?.raw_user_meta_data?.avatar_url;
+    if (avatarUrl) {
+      setProfileImage(avatarUrl);
     }
   };
 
   const getUserInitial = () => {
-    return user?.raw_user_meta_data?.name?.charAt(0) || 'U';
+    const currentName = user?.user_metadata?.name || user?.raw_user_meta_data?.name;
+    return currentName?.charAt(0)?.toUpperCase() || 'U';
   };
 
   const handleImageUpload = async () => {
@@ -49,34 +68,35 @@ export default function ProfileScreen() {
         quality: 0.7,
       });
 
-      if (!result.canceled) {
+      if (!result.canceled && result.assets && result.assets.length > 0) {
         setIsLoading(true);
         
-        // Compress the image
         const manipResult = await ImageManipulator.manipulateAsync(
           result.assets[0].uri,
           [{ resize: { width: 400 } }],
           { compress: 0.8, format: ImageManipulator.SaveFormat.JPEG }
         );
 
-        // Convert to blob
         const response = await fetch(manipResult.uri);
         const blob = await response.blob();
 
-        // Upload to Supabase Storage
         const fileName = `avatar-${user.id}-${Date.now()}.jpg`;
-        const { data, error } = await supabase.storage
+        const { data, error: uploadError } = await supabase.storage
           .from('avatars')
           .upload(fileName, blob);
 
-        if (error) throw error;
+        if (uploadError) throw uploadError;
 
-        // Get public URL
-        const { data: { publicUrl } } = supabase.storage
+        const { data: urlData } = supabase.storage
           .from('avatars')
           .getPublicUrl(fileName);
+        
+        const publicUrl = urlData?.publicUrl;
 
-        // Update user profile
+        if (!publicUrl) {
+          throw new Error('Failed to get public URL for uploaded image.');
+        }
+
         const { error: updateError } = await supabase.auth.updateUser({
           data: { avatar_url: publicUrl }
         });
@@ -86,8 +106,9 @@ export default function ProfileScreen() {
         setProfileImage(publicUrl);
         Alert.alert('Success', 'Profile picture updated successfully');
       }
-    } catch (error) {
-      Alert.alert('Error', error.message);
+    } catch (error: any) {
+      console.error("Image Upload Error:", error);
+      Alert.alert('Error', error?.message || 'Failed to upload image.');
     } finally {
       setIsLoading(false);
     }
@@ -129,14 +150,15 @@ export default function ProfileScreen() {
     setIsLoading(true);
     try {
       const { data: { user: updatedUser }, error } = await supabase.auth.updateUser({
-        data: { name },
+        data: { name: name.trim() },
       });
 
       if (error) throw error;
       Alert.alert('Success', 'Name updated successfully');
       setIsEditing(false);
-    } catch (error) {
-      Alert.alert('Error', error.message);
+    } catch (error: any) {
+      console.error("Name Update Error:", error);
+      Alert.alert('Error', error?.message || 'Failed to update name.');
     } finally {
       setIsLoading(false);
     }
