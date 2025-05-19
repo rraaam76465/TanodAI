@@ -17,7 +17,7 @@ import { DetectionDetails } from '@/components/DetectionDetails';
 import * as Notifications from 'expo-notifications';
 
 // Add this constant at the top after imports
-const FLASK_SERVER_URL = 'http://172.16.44.151:5005';
+const FLASK_SERVER_URL = 'http://172.16.46.32:5005';
 
 export default function NotificationsScreen() {
   const [serverStatus, setServerStatus] = useState(false);

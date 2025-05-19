@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "1031949542842",
+    "project_id": "tanodai-ad7e7",
+    "storage_bucket": "tanodai-ad7e7.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:1031949542842:android:d8626a078f6b7ab0f66983",
+        "android_client_info": {
+          "package_name": "com.rraaam.tanodai"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyBcyrcBwoN-KUHzg_6RgGqAmC3GA3Dwc_E"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}

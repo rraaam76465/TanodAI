@@ -1,0 +1,35 @@
+name: Backup
+
+on:
+  push:
+    branches:
+      - main
+      - master
+  schedule:
+    - cron: '0 0 * * *'  # Run daily at midnight UTC
+
+jobs:
+  backup:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v3
+        with:
+          fetch-depth: 0
+
+      - name: Create backup
+        run: |
+          git config --global user.name "GitHub Action"
+          git config --global user.email "action@github.com"
+          timestamp=$(date +%Y%m%d_%H%M%S)
+          git tag backup_$timestamp
+          git push origin backup_$timestamp
+
+      - name: Cleanup old backups
+        run: |
+          # Keep only the last 30 backup tags
+          backup_tags=$(git tag -l "backup_*" | sort -r | tail -n +31)
+          if [ ! -z "$backup_tags" ]; then
+            echo "$backup_tags" | xargs -I {} git push origin :{}
+            echo "$backup_tags" | xargs git tag -d
+          fi 
